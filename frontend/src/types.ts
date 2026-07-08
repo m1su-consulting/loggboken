@@ -56,6 +56,7 @@ export type DiffStatus = 'same' | 'different' | 'left_only' | 'right_only'
 export interface EnvironmentVersion {
   environment_name: string
   version: string
+  host_or_cluster: string | null
 }
 
 export interface EnvironmentDiffItem {

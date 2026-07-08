@@ -1,4 +1,10 @@
-import type { EnvironmentDiffResponse, InstallationSearchResponse, SortDir, SortField } from './types'
+import type {
+  EnvironmentDiffResponse,
+  EnvironmentListResponse,
+  InstallationSearchResponse,
+  SortDir,
+  SortField,
+} from './types'
 
 export interface SearchInstallationsParams {
   q: string
@@ -32,6 +38,14 @@ export async function searchInstallations(
     throw new Error(`${response.status} ${response.statusText}`)
   }
   return response.json() as Promise<InstallationSearchResponse>
+}
+
+export async function listEnvironments(signal?: AbortSignal): Promise<EnvironmentListResponse> {
+  const response = await fetch('/api/v1/environments?limit=200', { signal })
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`)
+  }
+  return response.json() as Promise<EnvironmentListResponse>
 }
 
 export interface DiffEnvironmentsParams {

@@ -50,6 +50,16 @@ Kör den på egna portar om standardinstansen redan är igång samtidigt
 ner standardinstansen först med `docker compose down`). Städa bort helt med
 `docker compose -p loggboken-test down -v`.
 
+**Vad seedas:** tre RPM-miljöer (`proj1`, `proj2`, `prod`) och fyra
+Kubernetes-projektgrupper (`proj1-*`, `proj2-*`, `proj3-*`, `prod-*`), bra
+underlag för både miljö-prefix-bläddring och diff mellan miljöer. `prod`
+körs dessutom på **två kluster** — `k821.prod` (huvud: `prod-frontend`,
+`prod-backend`, `prod-worker`) och `k822.prod` (`prod-backend-k822`, samma
+`api`-image+version som `prod-backend`) — för att visa att en och samma
+artefakt kan vara installerad i flera kluster samtidigt, både i
+installationstabellen och i "Jämför miljöer". `proj1`/`proj2`/`proj3` delar
+klustret `k811.system`.
+
 **Testdatabasen** (`--profile test`, tmpfs) är en tredje, separat sak — se
 avsnittet "Tester" nedan. Den är till för `uv run pytest`, inte för manuell
 utforskning.
@@ -70,20 +80,40 @@ Två flikar:
   klickbara sorterbara kolumner. Varje aktiv rad har en **"Ta bort"-knapp**
   (`DELETE /api/v1/installations/{id}`) — kräver en API-nyckel, angiven i
   fältet i verktygsraden och sparad i `localStorage` (bara på den här fliken;
-  Jämför miljöer är läs-only).
+  Jämför miljöer är läs-only). Kolumnerna radbryts aldrig, så tabellen kan bli
+  bredare än fönstret — "Ta bort"-kolumnen är fastnålad i högerkanten
+  (`position: sticky; right: 0`), så knappen alltid syns utan att behöva
+  scrolla hela vägen till höger.
 - **Jämför miljöer** (`EnvironmentDiff.tsx`) — två miljöer (eller
-  projektprefix-grupper) sida vid sida mot `GET /environments/diff`. Visar
-  **båda källtyperna samtidigt** (RPM och Kubernetes, var sin sektion) så
-  fort båda fälten är ifyllda — ingen källtyp behöver väljas manuellt.
-  Varje sektion: tabell med vänster-/högerversion per artefakt och en
-  statusbadge (samma / olika version / bara vänster / bara höger).
+  projektprefix-grupper) sida vid sida mot `GET /environments/diff`. Hämtar
+  **båda källtyperna samtidigt** (RPM och Kubernetes, i parallell) så fort
+  båda fälten är ifyllda — ingen källtyp behöver väljas manuellt. Resultaten
+  slås ihop till **en enda tabell** med en **"Typ"-kolumn** (källtyp-badge)
+  längst till vänster istället för separata sektioner per källtyp, plus
+  vänster-/högerversion per artefakt (miljönamn **och host/cluster**, t.ex.
+  `1.5.0 (proj1-backend · k811.system)`) och en statusbadge (samma /
+  olika version / bara vänster / bara höger).
 
 Designsystemet ligger i `src/App.css` som CSS custom properties, med stöd för
 både ljust och mörkt läge. Badges använder släta, mättade färger (vit text)
-för status/källtyp/diff istället för bleka pastellfärger. En blek, stor
-logbok-glyf (`Logo.tsx`) ligger fixerad i bakgrundens nedre högra hörn som en
-diskret vattenstämpel — en enda instans, inte ett upprepat mönster. I
-headern sitter loggan i vänsterhörnet med titeln centrerad i mitten.
+för status/källtyp/diff istället för bleka pastellfärger. Appens brand-tema
+(header, fokusringar, aktiv flik, länkar/knappar) är Bolagsverkets faktiska
+gult/blå-palett — det dominerande intrycket på bolagsverket.se är en ganska
+**ljus** blå (deras kort-/listbakgrunder, inte en mörk marinblå yta), så
+header-gradienten går från en medelblå (`--gradient-start: #1d5fa8`) till en
+ljusare himmelsblå (`--gradient-end: #4f95d9`) med en guldkant
+(`border-bottom: 3px solid #f6ca47`) under headern och guld (`#f6ca47`) som
+accent på loggans ram/spänne/stjärna. `--color-accent` (länkar, fokusringar,
+aktiv flik) är den mörkare länkblåa `#2a63b7`, och `--color-accent-bg`
+(hover/paginering) är en blek blå kortbakgrund (`#d3e9f8`) — färgerna är
+avlästa pixel för pixel ur en skärmdump av bolagsverket.se. Källtyp-/statusbadges (rpm=amber, kubernetes=turkos,
+aktiv=grön osv.) är oberoende identitetsfärger och påverkas inte av bytet.
+Loggan (`Logo.tsx` + `favicon.svg`) är en tiltad, sluten läderbunden loggbok
+med rem, spänne och en guldstämplad stjärna — läder-/pergamentfärgerna på
+själva bokillustrationen är kvar som en varm detalj mot den marinblå
+cirkelbadgen. En blek, stor logbok-glyf ligger fixerad i bakgrundens nedre
+högra hörn som en diskret vattenstämpel — en enda instans, inte ett upprepat
+mönster. I headern sitter loggan i vänsterhörnet med titeln centrerad i mitten.
 
 **Via docker-compose** (startas redan av `docker compose up -d --build` ovan):
 produktionsimage (nginx), `http://localhost:5173`, proxyar `/api/*` till
@@ -188,13 +218,70 @@ curl -X POST "http://localhost:8000/api/v1/environments/<environment_id>/snapsho
     "source_type": "kubernetes",
     "data": {
       "namespace": "proj1-toolchain-exempel",
-      "cluster": "prod-cluster-eu-west",
-      "containers": [
-        {"image": "registry.example.com/proj1/toolchain:1.4.2"}
-      ]
+      "cluster": "k811.system",
+      "pods": {
+        "items": [
+          {
+            "metadata": {
+              "name": "toolchain-7f9c9d-abc12",
+              "annotations": {"kubectl.kubernetes.io/default-container": "toolchain"}
+            },
+            "spec": {
+              "containers": [
+                {"name": "toolchain", "image": "registry.example.com/proj1/toolchain:1.4.2"},
+                {"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}
+              ]
+            }
+          }
+        ]
+      }
     }
   }'
 ```
+
+`pods` är rådatan från `kubectl get pods -n proj1-toolchain-exempel -o json` — samma
+JSON-format rakt igenom, och stabilt mellan kubectl-versioner. `spec.initContainers`
+läses aldrig. Sidecars som `istio-proxy` delar `spec.containers` med huvudcontainern
+utan någon inbyggd k8s-flagga för det; finns annotationen
+`kubectl.kubernetes.io/default-container` (satt av bl.a. Istios auto-injection)
+litar parsern på den och tar bara den namngivna containern — `istio-proxy` ovan
+filtreras alltså bort och bara `toolchain` blir en installation.
+
+**Alternativ: rå `kubectl describe pods`-text.** Om källsystemet inte kan producera
+JSON går det att skicka in rå textutdata från `kubectl describe pods -n <namespace>`
+istället, via fältet `describe_output` — exakt ett av `pods`/`describe_output` måste
+anges:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/environments/<environment_id>/snapshot" \
+  -H "X-API-Key: dev-k8s-key" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c '
+import json
+describe_output = """Name:             toolchain-7f9c9d-abc12
+Namespace:        proj1-toolchain-exempel
+Annotations:      kubectl.kubernetes.io/default-container: toolchain
+Containers:
+  toolchain:
+    Image:          registry.example.com/proj1/toolchain:1.4.2
+  istio-proxy:
+    Image:          istio/proxyv2:1.20.0
+"""
+print(json.dumps({
+    "source_type": "kubernetes",
+    "data": {
+        "namespace": "proj1-toolchain-exempel",
+        "cluster": "k811.system",
+        "describe_output": describe_output,
+    },
+}))
+')"
+```
+
+Konverteras internt (`app/parsers/kubectl_describe.py`) till samma interna Pod-form
+som `pods`-varianten, så samma sidecar-/initcontainer-filtrering gäller. Kubectls
+textlayout är dock kubectls egna människoläsbara format, inte en versionerad
+kontrakt-yta som `-o json` är — använd `pods` när källsystemet kan producera JSON.
 
 Svar: `{"environment_id": "...", "active": 1, "removed": 0}` — `removed` är antalet
 artefakter som fanns i databasen men saknades i den inskickade listan.
@@ -213,9 +300,14 @@ curl -X POST "http://localhost:8000/api/v1/environments/by-name/proj1-toolchain-
     "source_type": "kubernetes",
     "data": {
       "namespace": "proj1-toolchain-exempel",
-      "containers": [
-        {"image": "registry.example.com/proj1/toolchain:1.4.2"}
-      ]
+      "pods": {
+        "items": [
+          {
+            "metadata": {"name": "toolchain-7f9c9d-abc12"},
+            "spec": {"containers": [{"name": "toolchain", "image": "registry.example.com/proj1/toolchain:1.4.2"}]}
+          }
+        ]
+      }
     }
   }'
 ```

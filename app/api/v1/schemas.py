@@ -101,6 +101,7 @@ class ArtifactEnvironmentListResponse(BaseModel):
 class EnvironmentVersion(BaseModel):
     environment_name: str
     version: str
+    host_or_cluster: str | None = None
 
 
 class EnvironmentDiffItem(BaseModel):

@@ -233,13 +233,13 @@ async def search_installations(
 
 async def get_active_installations_for_environment_group(
     conn: asyncpg.Connection, *, environment: str, source_type: str
-) -> tuple[list[str], list[tuple[str, str, str]]]:
+) -> tuple[list[str], list[tuple[str, str, str, str | None]]]:
     """Resolves `environment` the same way search_installations' `environment`
     filter does (exact name or "environment-" prefix group) and returns the
     matching environment names plus every active (artifact_name, version,
-    environment_name) triple across all of them — the raw material for a
-    two-sided diff that can still show which specific namespace an artifact
-    came from."""
+    environment_name, host_or_cluster) tuple across all of them — the raw
+    material for a two-sided diff that can still show which specific
+    namespace/host an artifact came from."""
     env_rows = await conn.fetch(
         """
         SELECT name FROM environments
@@ -254,7 +254,8 @@ async def get_active_installations_for_environment_group(
 
     rows = await conn.fetch(
         """
-        SELECT a.name AS artifact_name, a.version AS artifact_version, e.name AS environment_name
+        SELECT a.name AS artifact_name, a.version AS artifact_version,
+               e.name AS environment_name, e.host_or_cluster AS host_or_cluster
         FROM installations i
         JOIN artifacts a ON a.id = i.artifact_id
         JOIN environments e ON e.id = i.environment_id
@@ -265,7 +266,7 @@ async def get_active_installations_for_environment_group(
         f"{environment}-%",
     )
     installations = [
-        (row["artifact_name"], row["artifact_version"], row["environment_name"])
+        (row["artifact_name"], row["artifact_version"], row["environment_name"], row["host_or_cluster"])
         for row in rows
     ]
     return matching_names, installations

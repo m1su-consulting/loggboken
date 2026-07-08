@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.main import app
+from app.parsers.kubernetes import DEFAULT_CONTAINER_ANNOTATION
 
 _PERSISTENT_LOCAL_DB_PORT = 5432
 _TEST_DB_PORT = 5433
@@ -54,7 +55,40 @@ def rpm_payload(host: str, packages: list[dict], environment_name: str | None = 
 def kubernetes_payload(
     namespace: str, containers: list[dict], cluster: str | None = None
 ) -> dict:
-    data = {"namespace": namespace, "containers": containers}
+    """Bygger en kubectl-get-pods-o-json-formad payload. Varje dict i
+    `containers` blir en egen enkontainer-pod, vilket bevarar den gamla
+    "en rad = en installation"-semantiken de flesta tester förlitar sig på.
+    Ett dict kan också ange `name` (containerns namn), `pod` (poddens namn)
+    och `default_container` (annotationsvärde, för sidecar-filtreringstester)
+    utöver det obligatoriska `image`. För tester som behöver flerkontainer-
+    poddar (sidecars, initContainers) rakt av, bygg pods direkt och använd
+    `kubernetes_payload_from_pods`.
+    """
+    items = []
+    for index, container in enumerate(containers):
+        image = container["image"]
+        container_name = (
+            container.get("name") or image.rsplit("/", 1)[-1].split(":")[0].split("@")[0]
+        )
+        pod_name = container.get("pod") or f"{namespace}-pod-{index}"
+        annotations = {}
+        if "default_container" in container:
+            annotations[DEFAULT_CONTAINER_ANNOTATION] = container["default_container"]
+
+        items.append(
+            {
+                "metadata": {"name": pod_name, "annotations": annotations},
+                "spec": {"containers": [{"name": container_name, "image": image}]},
+            }
+        )
+
+    return kubernetes_payload_from_pods(namespace, items, cluster=cluster)
+
+
+def kubernetes_payload_from_pods(
+    namespace: str, pods: list[dict], cluster: str | None = None
+) -> dict:
+    data: dict = {"namespace": namespace, "pods": {"items": pods}}
     if cluster is not None:
         data["cluster"] = cluster
     return {"source_type": "kubernetes", "data": data}

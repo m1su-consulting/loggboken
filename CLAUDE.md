@@ -90,14 +90,36 @@ CREATE INDEX ON installations (artifact_id);
 ### 2. Databasschema och migrationer
 - Skapa Alembic-migration för `environments`, `artifacts`, `installations` enligt schema ovan
 - Konfigurera `asyncpg`-pool med rimlig `min_size`/`max_size` för samtidig belastning
-- Seed-script/fixture för testdata (exempel-environments, artifacts, installations) så manuell test av endpoints inte kräver att man bygger upp state för hand
+- Seed-script/fixture för testdata (exempel-environments, artifacts, installations) så manuell test av endpoints inte kräver att man bygger upp state för hand.
+  Innehåll (`scripts/seed.py`): tre RPM-miljöer (`proj1`, `proj2`, `prod`) och fyra Kubernetes-projektgrupper
+  (`proj1-*`, `proj2-*`, `proj3-*`, `prod-*`). `proj1`/`proj2`/`proj3` delar klustret `k811.system`; `prod` körs på
+  **två** kluster (`k821.prod` huvud, `k822.prod` sekundär) med samma `api`-image+version speglad på båda
+  (`prod-backend` / `prod-backend-k822`) — visar att en artefakt kan vara installerad i flera kluster samtidigt,
+  både i installationstabellen och i diff-vyn
 
 *Klart när:* Migrationer körs rent mot en tom PostgreSQL-databas, alla tabeller, constraints och index skapas korrekt; seed-scriptet fyller databasen med användbar testdata med ett kommando
 
 ### 3. Källsystem-parsers
 - Gemensamt interface: `BaseSourceParser.parse(raw_json) -> list[ArtifactInstallation]`
 - `RpmSourceParser`: extraherar paketnamn, version, arch; miljö = värdspecifik identifierare (ej hostname i sig — se `environments.name` vs `host_or_cluster`)
-- `KubernetesSourceParser`: extraherar container-image som artefakt; miljö = namespace, `host_or_cluster` = klusternamn
+- `KubernetesSourceParser`: extraherar container-image som artefakt; miljö = namespace, `host_or_cluster` = klusternamn.
+  Två indataformat stöds, exakt ett av dem per payload:
+  - `pods` (rekommenderat) — rådatan från `kubectl get pods -n <namespace> -o json` rakt av, plus
+    `namespace`/`cluster`/`metadata` som kubectl självt inte känner till. Stabilt mellan kubectl-versioner.
+  - `describe_output` — rå textutdata från `kubectl describe pods -n <namespace>` (en eller flera poddar i följd).
+    Konverteras internt (`app/parsers/kubectl_describe.py`, indenteringsbaserad radparsning: containernamn = exakt
+    två blanksteg + kolon, fält därunder = fyra eller fler) till samma Pod-form som `pods`, så filtreringslogiken
+    nedan är identisk oavsett format. Kubectls textlayout är inte en versionerad kontrakt-yta, så `pods` är det
+    robustare valet när källsystemet kan producera JSON — `describe_output` finns för källsystem som bara har
+    tillgång till `kubectl describe`-utdata (t.ex. ett manuellt/interaktivt script).
+
+  Oavsett format: `spec.initContainers` läses aldrig (uteslutet helt gratis). Sidecars (istio-proxy m.fl.) delar
+  `spec.containers` med huvudcontainern utan någon inbyggd k8s-flagga — om podden har annotationen
+  `kubectl.kubernetes.io/default-container` (satt av bl.a. Istios auto-injection) litar parsern på den och tar bara
+  den namngivna containern; saknas annotationen tas alla `spec.containers` (inget tillförlitligt sätt att gissa
+  huvudcontainern annars). `spec.nodeName` (vilken nod, om flera i klustret) sparas i `raw_data["node"]` för
+  spårbarhet — påverkar inte dedup: flera repliker av samma Deployment på olika noder i samma namespace slås ihop
+  till en aktiv installation via `UNIQUE(environment_id, artifact_id)`, oavsett hur många noder/poddar de sprids över
 - Varje parser normaliserar till intern representation men behåller `raw_data` för spårbarhet
 - Hantera trasig/ofullständig indata utan att krascha hela requesten
 
@@ -198,26 +220,51 @@ GET /api/v1/environments/diff?left=...&right=...&source_type=...
 - Sökfält (debounced 300ms), källtyp-filter, "visa borttagna"-toggle, klickbara
   sorterbara kolumnrubriker, statusbadges — designsystem via CSS custom properties
   med stöd för ljust/mörkt läge (`prefers-color-scheme`)
-- Logga (`Logo.tsx` + `public/favicon.svg`): en öppen loggbok — mjuka, kurvade
-  sidor (inte raka trapetser) i en blå→turkos gradientcirkel, med tunna
-  "loggrader" och ett amber bokmärkesband som accent. Sidhuvudet
-  (`.site-header`) har logga i vänsterhörnet, centrerad titel/undertitel i
-  mitten (CSS-grid `auto 1fr auto`, tom spacer-div i tredje kolumnen för att
-  balansera) och en gradientbakgrund + färgade källtyp-badges (rpm=amber,
-  kubernetes=turkos) för mer färg utöver den neutrala tabellgrunden.
+- Brand-tema: Bolagsverkets faktiska färgpalett — mörk marinblå→länkblå
+  gradient (inte grönt, som en tidigare gissning antog), avläst pixel för
+  pixel ur en skärmdump av bolagsverket.se: `--gradient-start: #0c2754`
+  (rgb 12,39,84 — rubriker/aktiv-nav-text på riktiga sajten) →
+  `--gradient-end: #2a63b7` (rgb 42,99,183 — länkfärg), `--color-accent: #2a63b7`,
+  `--color-accent-bg: #d3e9f8` (rgb 211,233,248 — samma bleka blå som deras
+  kort-/listbakgrunder), guld `#f6ca47` (rgb 246,202,71 — samma gult som deras
+  logga och CTA-knapp) som ramfärg/detalj på `Logo.tsx`. Applicerad app-brett
+  (sidhuvud, fokusringar, aktiv flik, paginering, länkar), med mörkläges-
+  varianter (`#7fb3f0` accent, `#16324f` accent-bg på mörk botten).
+  Källtyp-/statusbadges (rpm=amber, kubernetes=turkos, aktiv=grön, borttagen=grå,
+  diff-status) är oberoende identitetsfärger och byttes inte ut vid rebrandingen
+  — de kodar vilken sorts data det är, inte appens brand.
+- Logga (`Logo.tsx` + `public/favicon.svg`): en tiltad (roterad -10°), sluten
+  läderbunden loggbok — pergamentfärgade sidkanter som syns bakom pärmen, en
+  mörk läderrem med spänne tvärs över pärmen, en guldstämplad stjärna och ett
+  amber bokmärkesband som sticker ut upptill — mer hantverksmässig/detaljerad
+  än en tidigare uppslagen-bok-variant som upplevdes tråkig. Bokens läder-/
+  pergamentfärger är kvar som en varm illustrationsdetalj mot den marinblå
+  cirkelbadgen. `favicon.svg` cache-bustas med `?v=4` i `index.html` eftersom
+  webbläsare cachar favicons hårt — en ren filändring räcker inte för att synas
+  i en redan öppen flik. Sidhuvudet (`.site-header`) har logga i vänsterhörnet,
+  centrerad titel/undertitel i mitten (CSS-grid `auto 1fr auto`, tom
+  spacer-div i tredje kolumnen för att balansera).
 - Flikar (enkel state-switch, inget router-bibliotek): "Installationer" (huvudtabellen,
   med ett separat "Miljö"-fält som använder `environment`-filtret ovan —
   precist, till skillnad från det fria textsöket) och "Jämför miljöer"
   (`EnvironmentDiff.tsx`): två inmatningsfält (ingen källtyp-väljare) —
-  visar **båda källtyperna samtidigt** (en `DiffResultSection` för RPM och en
-  för Kubernetes, hämtade i parallell) så fort båda miljöfälten är ifyllda;
-  tabell med vänster-/högerversion och statusbadge per artefakt mot
-  `GET /environments/diff`
+  hämtar **båda källtyperna samtidigt** (RPM och Kubernetes, i parallell) så
+  fort båda miljöfälten är ifyllda och slår ihop resultaten till **en enda
+  tabell** med en **"Typ"-kolumn** (källtyp-badge) längst till vänster —
+  separata sektioner per källtyp upplevdes rörigt; vänster-/högerversion
+  (miljönamn + host/cluster, `EnvironmentVersion.host_or_cluster` — trädde
+  igenom hela vägen från `installations_repo.get_active_installations_for_environment_group`
+  → `app/diffing.py` → API-schemat, saknades tidigare i diff-vyn) och
+  statusbadge per artefakt mot `GET /environments/diff`
 - KPI-rad (stat tiles, se dataviz-skillens mönster: label + semibold värde)
   överst på Installationer: aktiva totalt / RPM / Kubernetes / borttagna
 - "Ta bort"-knapp per rad, bara på Installationer-fliken (Jämför miljöer är
   läs-only) — anropar `DELETE /api/v1/installations/{id}`, kräver en
-  API-nyckel som anges i ett fält i verktygsraden och sparas i `localStorage`
+  API-nyckel som anges i ett fält i verktygsraden och sparas i `localStorage`.
+  Tabellen radbryter aldrig (breda kolumner), så "Ta bort"-kolumnen är
+  fastnålad i högerkanten (`.col-actions { position: sticky; right: 0 }`,
+  egen bakgrund + skugga eftersom innehåll scrollar under den) så knappen
+  aldrig kapas/döljs vid horisontell scroll
 - Badges: släta, mättade färger (vit text) — inte de bleka pastellfärgerna
   från första versionen — separata CSS-variabler för badge-färg (mättad) vs.
   diff-radernas bakgrundston (bleknad, för läsbarhet på hel rad)
@@ -237,7 +284,9 @@ GET /api/v1/environments/diff?left=...&right=...&source_type=...
 - Ingen skalningsoptimering utöver rimlig connection-pooling — optimera vid behov senare
 
 ## Beslutade svar på tidigare öppna frågor
-1. Format: JSON genomgående, men olika scheman beroende på källsystem (inte olika filformat)
+1. Format: JSON genomgående, men olika scheman beroende på källsystem (inte olika filformat). Kubernetes-parsern
+   accepterar dessutom rå `kubectl describe pods`-text, men den ligger då som ett strängvärde (`describe_output`)
+   inuti samma JSON-envelope — inte ett separat filformat på transportnivån
 2. Kubernetes-komponent = container-image; miljö = namespace, kluster = separat `host_or_cluster`-fält
 3. RPM-miljö identifieras via egen identifierare, men hostname sparas också i `host_or_cluster`
 4. Borttagning: primärt via snapshot-diff, men manuell borttagnings-endpoint finns också
@@ -245,5 +294,7 @@ GET /api/v1/environments/diff?left=...&right=...&source_type=...
 6. Ingen distribuerad låsning nu — atomär upsert + enkel konflikt-avvisning per miljö räcker
 
 ## Kvarstående öppna frågor (bra att lösa innan kodning, men blockerar inte start)
-- Exakt fältnamn/struktur i RPM- respektive Kubernetes-payloads (be om exempel-JSON om möjligt innan steg 3 påbörjas)
+- Exakt fältnamn/struktur i RPM-payloads (be om exempel-JSON från källsystemet om möjligt) — Kubernetes-sidan är
+  löst genom att ta Kubernetes-API:ets egna `kubectl get pods -o json`-schema rakt av istället för att gissa ett
+  eget (se steg 3)
 - Förväntad volym/frekvens av snapshots och händelser (påverkar dimensionering av connection pool och ev. framtida behov av kö/batch-bearbetning)

@@ -5,6 +5,28 @@ from fastapi.testclient import TestClient
 from tests.integration.conftest import kubernetes_payload, rpm_payload
 
 
+def _describe_output_payload(namespace: str, pod_name: str, image: str) -> dict:
+    describe_output = f"""\
+Name:             {pod_name}
+Namespace:        {namespace}
+Annotations:      kubectl.kubernetes.io/default-container: api
+Status:           Running
+Init Containers:
+  wait-for-db:
+    Image:         registry.example.com/team/wait-for-db:1.0.0
+Containers:
+  api:
+    Image:          {image}
+  istio-proxy:
+    Image:          istio/proxyv2:1.20.0
+QoS Class:       Burstable
+"""
+    return {
+        "source_type": "kubernetes",
+        "data": {"namespace": namespace, "describe_output": describe_output},
+    }
+
+
 def _create_environment(client: TestClient, host: str, packages: list[dict]) -> str:
     created = client.post("/api/v1/installations", json=rpm_payload(host, packages))
     assert created.status_code == 201
@@ -181,3 +203,37 @@ def test_kubernetes_snapshot_diff(client: TestClient) -> None:
         i["artifact_name"] for i in full["items"] if i["status"] == "active"
     }
     assert active_names == {"registry.example.com/team/api"}
+
+
+def test_kubernetes_snapshot_via_describe_output_excludes_sidecar_and_init_container(
+    client: TestClient,
+) -> None:
+    namespace = f"snapshot-describe-{uuid4()}"
+    created = client.post(
+        "/api/v1/installations",
+        json=_describe_output_payload(
+            namespace, "api-7f9c9d-abc12", "registry.example.com/team/api:1.0.0"
+        ),
+    )
+    assert created.status_code == 201
+    environment_id = created.json()["environment_id"]
+
+    response = client.post(
+        f"/api/v1/environments/{environment_id}/snapshot",
+        json=_describe_output_payload(
+            namespace, "api-8a1b2c-def34", "registry.example.com/team/api:2.0.0"
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"environment_id": environment_id, "active": 1, "removed": 1}
+
+    full = client.get(
+        f"/api/v1/environments/{environment_id}/installations",
+        params={"include_removed": True},
+    ).json()
+    # bara "api" (huvudcontainern via default-container-annotationen) —
+    # istio-proxy (sidecar) och wait-for-db (init-container) ska aldrig
+    # dyka upp, i vare sig aktiva eller borttagna installationer.
+    all_names = {i["artifact_name"] for i in full["items"]}
+    assert all_names == {"registry.example.com/team/api"}

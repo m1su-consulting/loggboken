@@ -13,9 +13,12 @@ så exempeldatan garanterat följer samma konventioner (t.ex. att RPM-artefakter
 namnges "version.arch").
 
 Tre RPM-miljöer (proj1, proj2, prod) med egna applikationer (inte
-OS-paket som openssl/curl), och tre Kubernetes-projektgrupper
-(proj1-*, proj2-*, prod-*) med flera namespaces vardera — bra underlag
-för att testa både miljö-prefix-bläddring och diff mellan miljöer.
+OS-paket som openssl/curl), och fyra Kubernetes-projektgrupper
+(proj1-*, proj2-*, proj3-*, prod-*) med flera namespaces vardera — bra
+underlag för att testa både miljö-prefix-bläddring och diff mellan miljöer.
+prod körs dessutom på två kluster (k821.prod, k822.prod) med samma app+version
+speglad på båda, för att visa att en artefakt kan vara installerad i flera
+kluster samtidigt.
 """
 import asyncio
 import sys
@@ -63,56 +66,197 @@ RPM_PAYLOADS = [
     },
 ]
 
+def _pod(
+    name: str,
+    image: str,
+    *,
+    container_name: str = "app",
+    sidecars: list[dict] | None = None,
+    init_containers: list[dict] | None = None,
+    node: str | None = None,
+) -> dict:
+    """Bygger ett Pod-objekt i samma form som `kubectl get pods -o json`
+    ger. Om `sidecars` anges sätts `kubectl.kubernetes.io/default-container`
+    till huvudcontainerns namn, så parserns sidecar-filtrering har något att
+    filtrera bort — precis som en Istio-injicerad pod i verkligheten."""
+    containers = [{"name": container_name, "image": image}]
+    annotations = {}
+    if sidecars:
+        containers.extend(sidecars)
+        annotations["kubectl.kubernetes.io/default-container"] = container_name
+
+    spec: dict = {"containers": containers}
+    if init_containers:
+        spec["initContainers"] = init_containers
+    if node:
+        spec["nodeName"] = node
+
+    return {"metadata": {"name": name, "annotations": annotations}, "spec": spec}
+
+
+# backend-poddarna bär en istio-proxy-sidecar + en wait-for-db-initcontainer
+# för att visa att bara "api" (huvudcontainern, pekad ut via
+# default-container-annotationen) landar som artefakt — sidecar och
+# initcontainer ska aldrig dyka upp i installationer eller diff.
 KUBERNETES_PAYLOADS = [
     {
         "namespace": "proj1-frontend",
-        "cluster": "eu-west-cluster",
+        "cluster": "k811.system",
         "metadata": {"team": "proj1"},
-        "containers": [{"image": "registry.example.com/shared/frontend:2.0.0"}],
+        # 2 repliker på olika noder i samma kluster — ska landa som EN aktiv
+        # installation, inte två, och diffa normalt mot andra miljöer.
+        "pods": {
+            "items": [
+                _pod(
+                    "proj1-frontend-7f8b6-x1",
+                    "registry.example.com/shared/frontend:2.0.0",
+                    node="node-1",
+                ),
+                _pod(
+                    "proj1-frontend-7f8b6-x2",
+                    "registry.example.com/shared/frontend:2.0.0",
+                    node="node-2",
+                ),
+            ]
+        },
     },
     {
         "namespace": "proj1-backend",
-        "cluster": "eu-west-cluster",
+        "cluster": "k811.system",
         "metadata": {"team": "proj1"},
-        "containers": [{"image": "registry.example.com/shared/api:1.5.0"}],
+        "pods": {
+            "items": [
+                _pod(
+                    "proj1-backend-6c9d5-k2p",
+                    "registry.example.com/shared/api:1.5.0",
+                    container_name="api",
+                    sidecars=[{"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}],
+                    init_containers=[
+                        {"name": "wait-for-db", "image": "registry.example.com/shared/wait-for-db:1.0.0"}
+                    ],
+                )
+            ]
+        },
     },
     {
         "namespace": "proj1-worker",
-        "cluster": "eu-west-cluster",
+        "cluster": "k811.system",
         "metadata": {"team": "proj1"},
-        "containers": [{"image": "registry.example.com/shared/worker:1.0.0"}],
+        "pods": {
+            "items": [_pod("proj1-worker-5d7f8-m3q", "registry.example.com/shared/worker:1.0.0")]
+        },
     },
     {
         "namespace": "proj2-frontend",
-        "cluster": "eu-west-cluster",
+        "cluster": "k811.system",
         "metadata": {"team": "proj2"},
         # äldre version av frontend än proj1/prod — bra för diff-demo
-        "containers": [{"image": "registry.example.com/shared/frontend:1.9.0"}],
+        "pods": {
+            "items": [_pod("proj2-frontend-9a1c2-p7r", "registry.example.com/shared/frontend:1.9.0")]
+        },
     },
     {
         "namespace": "proj2-backend",
-        "cluster": "eu-west-cluster",
+        "cluster": "k811.system",
         "metadata": {"team": "proj2"},
-        "containers": [{"image": "registry.example.com/shared/api:1.5.0"}],
+        "pods": {
+            "items": [
+                _pod(
+                    "proj2-backend-3e4f5-t8w",
+                    "registry.example.com/shared/api:1.5.0",
+                    container_name="api",
+                    sidecars=[{"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}],
+                    init_containers=[
+                        {"name": "wait-for-db", "image": "registry.example.com/shared/wait-for-db:1.0.0"}
+                    ],
+                )
+            ]
+        },
+    },
+    {
+        "namespace": "proj3-frontend",
+        "cluster": "k811.system",
+        "metadata": {"team": "proj3"},
+        # samma version som proj1/prod — bra för "same"-status i diff-demon
+        "pods": {
+            "items": [_pod("proj3-frontend-6b2d9-w4k", "registry.example.com/shared/frontend:2.0.0")]
+        },
+    },
+    {
+        "namespace": "proj3-backend",
+        "cluster": "k811.system",
+        "metadata": {"team": "proj3"},
+        # samma version som proj1/proj2 — "same" mot dem, "different" mot prod (1.6.0)
+        "pods": {
+            "items": [
+                _pod(
+                    "proj3-backend-7c1f0-r2m",
+                    "registry.example.com/shared/api:1.5.0",
+                    container_name="api",
+                    sidecars=[{"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}],
+                    init_containers=[
+                        {"name": "wait-for-db", "image": "registry.example.com/shared/wait-for-db:1.0.0"}
+                    ],
+                )
+            ]
+        },
     },
     {
         "namespace": "prod-frontend",
-        "cluster": "prod-cluster-eu-west",
+        "cluster": "k821.prod",
         "metadata": {"team": "platform"},
-        "containers": [{"image": "registry.example.com/shared/frontend:2.0.0"}],
+        "pods": {
+            "items": [_pod("prod-frontend-2b3c4-v9x", "registry.example.com/shared/frontend:2.0.0")]
+        },
     },
     {
         "namespace": "prod-backend",
-        "cluster": "prod-cluster-eu-west",
+        "cluster": "k821.prod",
         "metadata": {"team": "platform"},
         # nyare version av api än proj1/proj2 — bra för diff-demo
-        "containers": [{"image": "registry.example.com/shared/api:1.6.0"}],
+        "pods": {
+            "items": [
+                _pod(
+                    "prod-backend-8f1a2-z4y",
+                    "registry.example.com/shared/api:1.6.0",
+                    container_name="api",
+                    sidecars=[{"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}],
+                    init_containers=[
+                        {"name": "wait-for-db", "image": "registry.example.com/shared/wait-for-db:1.0.0"}
+                    ],
+                )
+            ]
+        },
     },
     {
         "namespace": "prod-worker",
-        "cluster": "prod-cluster-eu-west",
+        "cluster": "k821.prod",
         "metadata": {"team": "platform"},
-        "containers": [{"image": "registry.example.com/shared/worker:1.0.0"}],
+        "pods": {
+            "items": [_pod("prod-worker-4d5e6-q1w", "registry.example.com/shared/worker:1.0.0")]
+        },
+    },
+    {
+        # prod körs på två kluster (k821.prod huvud, k822.prod sekundär) —
+        # samma app+version speglad på båda för att visa att EN artefakt kan
+        # vara installerad i flera kluster samtidigt (syns som separata
+        # rader i installationstabellen, en per (miljö, artefakt)).
+        "namespace": "prod-backend-k822",
+        "cluster": "k822.prod",
+        "metadata": {"team": "platform"},
+        "pods": {
+            "items": [
+                _pod(
+                    "prod-backend-k822-3d7e1-h5n",
+                    "registry.example.com/shared/api:1.6.0",
+                    container_name="api",
+                    sidecars=[{"name": "istio-proxy", "image": "istio/proxyv2:1.20.0"}],
+                    init_containers=[
+                        {"name": "wait-for-db", "image": "registry.example.com/shared/wait-for-db:1.0.0"}
+                    ],
+                )
+            ]
+        },
     },
 ]
 

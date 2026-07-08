@@ -4,11 +4,11 @@
   --color-border: #e2e8f0;
   --color-text: #0f172a;
   --color-text-muted: #64748b;
-  --color-accent: #2563eb;
-  --color-accent-bg: #eff6ff;
+  --color-accent: #2a63b7;
+  --color-accent-bg: #d3e9f8;
   --color-error-bg: #fef2f2;
   --color-error-text: #b91c1c;
-  --color-row-hover: #f0f9ff;
+  --color-row-hover: #eef6fc;
   --shadow-panel: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.08);
   --radius: 10px;
   --space-1: 4px;
@@ -17,9 +17,15 @@
   --space-4: 16px;
   --space-6: 24px;
 
-  /* brand: gradient bookends the logo, amber is the "helm handle" accent */
-  --gradient-start: #1d4ed8;
-  --gradient-end: #0891b2;
+  /* brand: Bolagsverket's actual palette — sampled from a screenshot of
+     bolagsverket.se. The dominant impression there is a fairly LIGHT blue
+     (their card/list backgrounds are the big blue area on the page, not a
+     dark navy wash — navy only ever appears as small text) plus gold as a
+     distinct accent. --color-accent stays the darker, readable link blue;
+     the header/logo gradient uses lighter blues so the banner doesn't read
+     as a heavy dark-navy block. */
+  --gradient-start: #1d5fa8;
+  --gradient-end: #4f95d9;
 
   /* vivid, solid badge colors (white text) — status/identity, not row washes.
      Theme-independent on purpose: a solid chip+white-text pill reads fine on
@@ -45,11 +51,11 @@
     --color-border: #263042;
     --color-text: #e2e8f0;
     --color-text-muted: #94a3b8;
-    --color-accent: #60a5fa;
-    --color-accent-bg: #1e293b;
+    --color-accent: #7fb3f0;
+    --color-accent-bg: #16324f;
     --color-error-bg: #451a1a;
     --color-error-text: #fca5a5;
-    --color-row-hover: #16233a;
+    --color-row-hover: #122a44;
     --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
 
     --color-diff-different-row: #431407;
@@ -77,7 +83,7 @@ body {
   z-index: -1;
   pointer-events: none;
   opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 27 C 30 24 17 33 16 50 C 17 67 30 76 50 73 Z' fill='none' stroke='%231d4ed8' stroke-width='2'/%3E%3Cpath d='M50 27 C 70 24 83 33 84 50 C 83 67 70 76 50 73 Z' fill='none' stroke='%231d4ed8' stroke-width='2'/%3E%3Cline x1='50' y1='27' x2='50' y2='73' stroke='%231d4ed8' stroke-width='2'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg transform='rotate(-10 50 50)' fill='none' stroke='%232a63b7' stroke-width='1.6'%3E%3Crect x='27' y='23' width='34' height='49' rx='4'/%3E%3Cline x1='33.5' y1='23' x2='33.5' y2='72'/%3E%3Cline x1='65' y1='29' x2='65' y2='71'/%3E%3Crect x='27' y='50' width='34' height='6.5'/%3E%3Crect x='53' y='49' width='8' height='8.5' rx='1.5'/%3E%3Cpath d='M38 23 L44 23 L44 13 L41 16 L38 13 Z'/%3E%3C/g%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right -160px bottom -160px;
   background-size: 760px 760px;
@@ -91,6 +97,7 @@ body {
 
 .site-header {
   background: linear-gradient(120deg, var(--gradient-start), var(--gradient-end));
+  border-bottom: 3px solid #f6ca47;
   position: relative;
   overflow: hidden;
 }
@@ -364,6 +371,29 @@ tbody tr:last-child td {
   border-bottom: none;
 }
 
+/* checkbox column stays narrow and unpadded so selection doesn't eat into
+   the table's usable width or push other columns further off-screen */
+th.col-checkbox,
+td.col-checkbox {
+  width: 1%;
+  padding-left: var(--space-3);
+  padding-right: var(--space-2);
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.bulk-count {
+  min-width: 8em;
+}
+
 .mono {
   font-family: ui-monospace, 'SF Mono', Consolas, monospace;
   font-size: 0.85rem;
@@ -416,21 +446,6 @@ tbody tr:last-child td {
 
 .badge-diff-right_only {
   background: var(--color-diff-right);
-}
-
-.diff-section + .diff-section {
-  border-top: 1px solid var(--color-border);
-}
-
-.diff-section-title {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-  background: var(--color-bg);
 }
 
 .diff-sides {
@@ -527,25 +542,25 @@ tr.diff-row-right_only td {
   cursor: not-allowed;
 }
 
-.delete-button {
-  padding: 3px 10px;
-  border: 1px solid var(--color-error-text);
+.bulk-apply-button {
+  padding: 4px 12px;
+  border: 1px solid var(--color-accent);
   border-radius: 6px;
   background: transparent;
-  color: var(--color-error-text);
-  font-size: 0.78rem;
+  color: var(--color-accent);
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
   white-space: nowrap;
 }
 
-.delete-button:hover:not(:disabled) {
-  background: var(--color-error-text);
+.bulk-apply-button:hover:not(:disabled) {
+  background: var(--color-accent);
   color: #fff;
 }
 
-.delete-button:disabled {
+.bulk-apply-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
