@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: environment_inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  # Ephemeral database for local test runs: data lives in tmpfs (RAM) only,
+  # so it never touches disk and is gone the moment the container stops.
+  # Not started by a plain `docker compose up` — only via --profile test.
+  postgres-test:
+    image: postgres:16-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: environment_inventory
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # overrides the host-oriented value from .env with the in-network
+      # service hostname, since the app runs alongside postgres here
+      APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/environment_inventory
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Production-style build: multi-stage image (npm run build -> nginx serving
+  # the static output, proxying /api to the "app" service). No source volume
+  # mount and no live-reload — rebuild the image (`--build`) to pick up changes.
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:

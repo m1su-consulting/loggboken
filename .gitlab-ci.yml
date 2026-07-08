@@ -1,0 +1,66 @@
+stages:
+  - test
+  - integration
+
+variables:
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+
+.uv-setup:
+  image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  before_script:
+    - uv sync --frozen
+  cache:
+    key: "uv-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/uv
+
+# Fast, DB-free unit tests (tests/unit) — parsers, auth logic, middleware,
+# ingestion orchestration with a mocked connection. Runs on every push to any
+# branch and on merge request pipelines, so feedback is immediate regardless
+# of target branch.
+unit-tests:
+  extends: .uv-setup
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - uv run pytest tests/unit -v
+
+# Type-checks and builds the frontend — catches TS errors and broken builds
+# on every push, same cadence as unit-tests, no backend/database needed.
+frontend-build:
+  image: node:22-slim
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  cache:
+    key: "npm-$CI_COMMIT_REF_SLUG"
+    paths:
+      - frontend/node_modules
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build
+
+# Integration tests (tests/integration) against a real, disposable Postgres.
+# Only runs on merge requests targeting main — that's the gate for landing
+# on main, not every feature-branch push.
+integration-tests:
+  extends: .uv-setup
+  stage: integration
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+  variables:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_DB: environment_inventory
+    APP_DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/environment_inventory"
+    APP_API_KEYS: '{"dev-rpm-key":{"client":"dev-rpm-agent","source_types":["rpm"]},"dev-k8s-key":{"client":"dev-k8s-agent","source_types":["kubernetes"]},"dev-admin-key":{"client":"dev-admin","source_types":null}}'
+  script:
+    - uv run alembic upgrade head
+    - uv run pytest tests/integration -v
