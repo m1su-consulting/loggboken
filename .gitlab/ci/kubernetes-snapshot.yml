@@ -1,0 +1,70 @@
+# Separat pipeline för periodisk Kubernetes-snapshot-insamling till Loggboken.
+# Ingår INTE i huvud-.gitlab-ci.yml (bygge/test) — den här filen är tänkt att
+# köras som sin egen pipeline via ett CI/CD-schema:
+#
+#   Settings > CI/CD > Schedules > New schedule
+#     Custom CI/CD configuration path: .gitlab/ci/kubernetes-snapshot.yml
+#     Interval Pattern: t.ex. varje natt
+#
+# Variabler att sätta i GitLab (Settings > CI/CD > Variables):
+#   - En "File"-typ per kluster med kubeconfig, t.ex. KUBECONFIG_PROJ1,
+#     KUBECONFIG_PROJ2, KUBECONFIG_PROD (GitLab skriver innehållet till en
+#     temp-fil åt dig — variabeln blir automatiskt en sökväg, redo att
+#     användas rakt av som $KUBECONFIG).
+#   - LOGGBOKEN_K8S_API_KEY — en API-nyckel vars source_types tillåter
+#     "kubernetes" (maskerad/protected).
+#
+# Klusternamnet (host_or_cluster) behöver INTE sättas manuellt — scriptet
+# läser det ur kubeconfig-filen (kontextens "cluster"-fält) automatiskt.
+# Sätt CLUSTER explicit i ett jobb bara om du vill visa ett annat/snyggare
+# namn än det som faktiskt står i kubeconfig.
+#
+# Ett jobb per kluster/prefix — lägg till fler `snapshot:<namn>`-block när
+# fler kluster/projekt tillkommer.
+
+stages:
+  - snapshot
+
+.kubernetes-snapshot:
+  stage: snapshot
+  image: alpine/k8s:1.30.0 # byt mot valfri image med kubectl + jq + curl
+  variables:
+    API_URL: https://loggboken.example.com/api/v1 # byt till er riktiga URL
+    API_KEY: $LOGGBOKEN_K8S_API_KEY
+  script:
+    - ./scripts/examples/kubernetes_snapshot.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+snapshot:proj1:
+  extends: .kubernetes-snapshot
+  variables:
+    KUBECONFIG: $KUBECONFIG_PROJ1
+    PREFIX: proj1
+
+snapshot:proj2:
+  extends: .kubernetes-snapshot
+  variables:
+    KUBECONFIG: $KUBECONFIG_PROJ2
+    PREFIX: proj2
+
+snapshot:proj3:
+  extends: .kubernetes-snapshot
+  variables:
+    KUBECONFIG: $KUBECONFIG_PROJ3
+    PREFIX: proj3
+
+# prod körs på två kluster — ett jobb per kluster, båda med PREFIX=prod så
+# varje kluster bara snapshottar sina egna "prod-*"-namespaces (t.ex.
+# prod-backend på k821, prod-backend-k822 på k822).
+snapshot:prod-k821:
+  extends: .kubernetes-snapshot
+  variables:
+    KUBECONFIG: $KUBECONFIG_PROD_K821
+    PREFIX: prod
+
+snapshot:prod-k822:
+  extends: .kubernetes-snapshot
+  variables:
+    KUBECONFIG: $KUBECONFIG_PROD_K822
+    PREFIX: prod

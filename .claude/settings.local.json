@@ -175,7 +175,9 @@
       "Bash(curl -s http://localhost:5173/assets/index-DZCSaUjt.js)",
       "Bash(curl -s \"http://localhost:8000/api/v1/environments?limit=200\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" --max-time 5 https://registry-1.docker.io/v2/)",
-      "Bash(curl -s http://localhost:5173/assets/index-DRCgI-4P.js)"
+      "Bash(curl -s http://localhost:5173/assets/index-DRCgI-4P.js)",
+      "Bash(docker rmi lotsen-prod-app *)",
+      "Bash(env)"
     ]
   }
 }
