@@ -44,6 +44,24 @@ frontend-build:
     - npm ci
     - npm run build
 
+# Frontend unit/component tests (Vitest + Testing Library) — components, hooks
+# and the api.ts fetch wrapper, all mocked/no backend needed. Same cadence as
+# unit-tests and frontend-build: every push and MR pipeline.
+frontend-tests:
+  image: node:22-slim
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  cache:
+    key: "npm-$CI_COMMIT_REF_SLUG"
+    paths:
+      - frontend/node_modules
+  script:
+    - cd frontend
+    - npm ci
+    - npm run test
+
 # Integration tests (tests/integration) against a real, disposable Postgres.
 # Only runs on merge requests targeting main — that's the gate for landing
 # on main, not every feature-branch push.
