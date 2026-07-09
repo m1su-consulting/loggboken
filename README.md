@@ -18,6 +18,10 @@ docker compose up -d --build                 # bygger och startar appen + Postgr
 docker compose exec app alembic upgrade head  # kör migrationer
 ```
 
+Eller kör samma sak med ett kommando: `./start-loggboken.sh up` (bygger, startar,
+migrerar och skriver ut URL:erna). `./start-loggboken.sh down` stänger ner.
+Se `./start-loggboken.sh` utan argument för alla lägen (även testinstansen nedan).
+
 Servern svarar på `GET http://localhost:8000/api/v1/health` (kräver ingen nyckel).
 `GET http://localhost:8000/api/v1/environments` ska ge `"total": 0` på en
 nystartad instans — annars är den inte längre ren.
@@ -45,10 +49,14 @@ docker compose -p loggboken-test exec app alembic upgrade head
 docker compose -p loggboken-test exec app python -m scripts.seed
 ```
 
-Kör den på egna portar om standardinstansen redan är igång samtidigt
-(`docker-compose.yml` har fasta portmappningar 8000/5173/5432 — annars stäng
-ner standardinstansen först med `docker compose down`). Städa bort helt med
-`docker compose -p loggboken-test down -v`.
+Eller: `./start-loggboken.sh up test` (samma steg, plus seedning, i ett kommando).
+Städa bort helt med `./start-loggboken.sh down test` (motsvarar
+`docker compose -p loggboken-test down -v`).
+
+Standardinstansen och testinstansen delar samma fasta portmappningar
+(8000/5173/5432 i `docker-compose.yml`) och kan därför inte köras samtidigt
+— stäng ner den ena (`./start-loggboken.sh down` / `down test`) innan du
+startar den andra.
 
 **Vad seedas:** tre RPM-miljöer (`proj1`, `proj2`, `prod`) och fyra
 Kubernetes-projektgrupper (`proj1-*`, `proj2-*`, `proj3-*`, `prod-*`), bra
@@ -438,10 +446,27 @@ uv run pytest tests/integration
 docker rm -f pg-test
 ```
 
+### Frontend
+
+Komponent-/enhetstester (Vitest + Testing Library) i `frontend/src/**/*.test.{ts,tsx}`
+— mockat API (`vi.mock('../api')`), inget nätverk och ingen backend behövs:
+
+```bash
+cd frontend
+npm install
+npm run test
+```
+
+Motsvarar `tests/unit` på backend-sidan: ren logik/rendering, inte ett riktigt
+anrop mot en körande server. Det finns ingen frontend-motsvarighet till
+`tests/integration` (mot en riktig databas) i dagsläget.
+
 ### GitLab CI (`.gitlab-ci.yml`)
 
 - **Varje push** (vilken branch som helst) och **varje merge request**: kör
-  `unit-tests` — `tests/unit`, ingen databas startas alls.
+  `unit-tests` (`tests/unit`, ingen databas), `frontend-build` (typkontroll +
+  `vite build`) och `frontend-tests` (`npm run test`) — inget av det kräver
+  databas eller backend.
 - **Merge request mot `main`**: kör därutöver `integration-tests` — startar en
   disponibel `postgres:16-alpine`-service, kör migrationerna, kör
   `tests/integration`. Körs inte för MR:ar mot andra branches eller för vanliga
