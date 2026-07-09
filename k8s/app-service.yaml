@@ -1,0 +1,21 @@
+# Namnet "app" är medvetet — frontend-imagens nginx.conf har
+# `proxy_pass http://app:8000/api/;` hårdkodat (samma hostname som
+# docker-compose-servicen), så Service måste heta exakt "app" i samma
+# namespace för att frontendens proxy ska hitta rätt utan att bygga om
+# frontend-imagen.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: loggboken
+  labels:
+    app.kubernetes.io/name: loggboken
+    app.kubernetes.io/component: app
+spec:
+  selector:
+    app.kubernetes.io/name: loggboken
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -1,0 +1,15 @@
+# Icke-känslig konfiguration för backend-appen (app/config.py, Settings-klassen,
+# env_prefix="APP_"). Hemligheter (databas-URL, API-nycklar) ligger i secret.example.yaml
+# istället.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loggboken-config
+  namespace: loggboken
+data:
+  # Byt till frontendens riktiga externa URL (t.ex. https://loggboken.example.com)
+  # när Ingress/DNS är på plats — annars blockar CORS anrop från webbläsaren.
+  APP_CORS_ALLOWED_ORIGINS: '["http://localhost:5173"]'
+  APP_DB_POOL_MIN_SIZE: "2"
+  APP_DB_POOL_MAX_SIZE: "10"
+  APP_MAX_REQUEST_BODY_BYTES: "1000000"

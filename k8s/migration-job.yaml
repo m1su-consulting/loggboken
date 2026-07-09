@@ -1,0 +1,30 @@
+# Engångsjobb: kör alembic-migrationerna mot den hanterade databasen.
+# Apply:a den här (och vänta på Complete) FÖRE app-deployment.yaml vid
+# första deploy, och igen varje gång en ny image-version har nya migrationer:
+#
+#   kubectl apply -f k8s/migration-job.yaml
+#   kubectl wait --for=condition=complete --timeout=120s job/loggboken-migrate -n loggboken
+#   kubectl delete job/loggboken-migrate -n loggboken   # Jobs är inte självrensande, ta bort innan nästa apply
+#
+# Kör INTE detta som en initContainer på app-deployment.yaml — med flera
+# repliker skulle varje pod försöka köra migrationerna samtidigt (alembic har
+# ingen inbyggd låsning mot det), ett separat engångs-Job undviker racet.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loggboken-migrate
+  namespace: loggboken
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: REGISTRY/loggboken-app:TAG # samma image som app-deployment.yaml
+          command: ["alembic", "upgrade", "head"] # /app/.venv/bin är på PATH i imagen
+          envFrom:
+            - configMapRef:
+                name: loggboken-config
+            - secretRef:
+                name: loggboken-secrets
